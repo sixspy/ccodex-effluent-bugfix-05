@@ -3,12 +3,17 @@ export const outfallsViewTemplate = `
     <div class="panel">
       <h3>排放口限值</h3>
       <table>
-        <thead><tr><th>编码</th><th>厂</th><th>河段</th><th>COD</th><th>氨氮</th><th>总磷</th><th>状态</th></tr></thead>
+        <thead><tr><th>编码</th><th>厂</th><th>河段</th><th>COD</th><th>氨氮</th><th>总磷</th><th>状态</th><th>临期许可</th></tr></thead>
         <tbody>
           <tr v-for="o in outfalls" :key="o.id">
             <td>{{ o.outfall_code }}</td><td>{{ o.plant_code }}</td><td>{{ o.river_reach }}</td>
             <td>{{ o.cod_limit }}</td><td>{{ o.nh3n_limit }}</td><td>{{ o.tp_limit }}</td>
             <td :class="statusClass(o.status)">{{ o.status }}</td>
+            <td>
+              <span v-if="o.near_expiry_permits && o.near_expiry_permits.length"
+                    class="warn">{{ o.near_expiry_permits.join('、') }} · 禁准排</span>
+              <span v-else class="muted">无</span>
+            </td>
           </tr>
         </tbody>
       </table>

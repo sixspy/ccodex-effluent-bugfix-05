@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS discharge_permits(
   tp_cap REAL NOT NULL,
   period_label TEXT NOT NULL,
   status TEXT NOT NULL,
+  valid_until TEXT,
+  near_expiry_window_days INTEGER NOT NULL DEFAULT 30,
   created_at TEXT NOT NULL,
   FOREIGN KEY(plant_id) REFERENCES plants(id)
 );
@@ -281,7 +283,8 @@ def seed_permits(conn: sqlite3.Connection) -> None:
             continue
         conn.execute(
             """INSERT INTO discharge_permits(permit_code,plant_id,quota_m3d,cod_cap,nh3n_cap,
-               tp_cap,period_label,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+               tp_cap,period_label,status,valid_until,near_expiry_window_days,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 row["permit_code"],
                 plant,
@@ -291,6 +294,8 @@ def seed_permits(conn: sqlite3.Connection) -> None:
                 float(row["tp_cap"]),
                 row["period_label"],
                 row.get("status", "有效"),
+                row.get("valid_until"),
+                int(row.get("near_expiry_window_days", 30)),
                 row.get("created_at", now_iso()),
             ),
         )
@@ -442,9 +447,34 @@ def seed_lineage(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_permit_window(conn: sqlite3.Connection) -> None:
+    """给旧库补许可临期窗字段，并回填在册许可的有效期。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(discharge_permits)")}
+    if "valid_until" not in cols:
+        conn.execute("ALTER TABLE discharge_permits ADD COLUMN valid_until TEXT")
+    if "near_expiry_window_days" not in cols:
+        conn.execute(
+            "ALTER TABLE discharge_permits ADD COLUMN "
+            "near_expiry_window_days INTEGER NOT NULL DEFAULT 30"
+        )
+    backfill = {
+        "DP-2026-E01": ("2027-12-31", 30),
+        "DP-2026-W02": ("2027-12-31", 30),
+        "DP-2026-N03": ("2026-11-30", 30),
+    }
+    for code, (until, window) in backfill.items():
+        conn.execute(
+            """UPDATE discharge_permits SET valid_until=COALESCE(valid_until, ?),
+               near_expiry_window_days=COALESCE(near_expiry_window_days, ?)
+               WHERE permit_code=?""",
+            (until, window, code),
+        )
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate_permit_window(conn)
         seed_users(conn)
         seed_plants(conn)
         seed_outfalls(conn)

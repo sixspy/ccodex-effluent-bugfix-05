@@ -6,8 +6,23 @@ from fastapi import APIRouter, HTTPException
 from auth import AuthHeader, require_user, require_writer
 from db import connect, now_iso, write_audit
 from models import OutfallIn
+from permit_window import permit_window_state
 
 router = APIRouter(tags=["outfalls"])
+
+
+def _permit_window_map(conn, plant_id: int) -> dict:
+    permits = conn.execute(
+        "SELECT * FROM discharge_permits WHERE plant_id=?", (plant_id,)
+    ).fetchall()
+    near, blocked = [], []
+    for p in permits:
+        window = permit_window_state(p)
+        if window["near_expiry_warn"] or window["expired"]:
+            near.append(p["permit_code"])
+        if window["block_release"]:
+            blocked.append(p["permit_code"])
+    return {"near_expiry_permits": near, "release_blocked_permits": blocked}
 
 
 @router.get("/api/outfalls")
@@ -25,7 +40,12 @@ def list_outfalls(authorization: AuthHeader = None, plant_id: int | None = None)
                 """SELECT o.*, p.plant_code, p.name plant_name FROM outfalls o
                    JOIN plants p ON p.id=o.plant_id ORDER BY o.id"""
             ).fetchall()
-        return {"items": [dict(r) for r in rows]}
+        items = []
+        for r in rows:
+            d = dict(r)
+            d.update(_permit_window_map(conn, r["plant_id"]))
+            items.append(d)
+        return {"items": items}
 
 
 @router.get("/api/outfalls/{outfall_id}")
@@ -44,7 +64,9 @@ def get_outfall(outfall_id: int, authorization: AuthHeader = None):
                WHERE outfall_id=? ORDER BY id DESC LIMIT 10""",
             (outfall_id,),
         ).fetchall()
-        return {"outfall": dict(row), "recent_samples": [dict(s) for s in recent]}
+        data = dict(row)
+        data.update(_permit_window_map(conn, row["plant_id"]))
+        return {"outfall": data, "recent_samples": [dict(s) for s in recent]}
 
 
 @router.post("/api/outfalls")

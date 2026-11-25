@@ -9,6 +9,7 @@ from auth import AuthHeader, require_user, require_writer
 from db import connect, now_iso, write_audit
 from locks import release, require_lock
 from models import SampleIn
+from permit_window import permit_window_state
 from validators import (
     adjudicate_exceed,
     metric_summary,
@@ -45,10 +46,25 @@ def list_samples(authorization: AuthHeader = None, status: str | None = None):
             ).fetchall()
         else:
             rows = conn.execute(q + " ORDER BY s.id DESC").fetchall()
+        permit_cache: dict[str, dict] = {}
         items = []
         for r in rows:
             d = dict(r)
             d["metrics"] = json.loads(d["metrics"] or "{}")
+            permit = conn.execute(
+                "SELECT * FROM discharge_permits WHERE permit_code=?",
+                (d["permit_ref"],),
+            ).fetchone()
+            if permit is not None:
+                window = permit_window_state(permit)
+                d["near_expiry_warn"] = window["near_expiry_warn"]
+                d["release_blocked"] = window["block_release"]
+                d["valid_until"] = window["valid_until"]
+                permit_cache[d["permit_ref"]] = window
+            else:
+                d["near_expiry_warn"] = False
+                d["release_blocked"] = True
+                d["valid_until"] = None
             items.append(d)
         return {"items": items}
 
@@ -70,6 +86,16 @@ def get_sample(sample_id: int, authorization: AuthHeader = None):
             raise HTTPException(404, "采样批次不存在")
         data = dict(row)
         data["metrics"] = json.loads(data["metrics"] or "{}")
+        permit = conn.execute(
+            "SELECT * FROM discharge_permits WHERE permit_code=?",
+            (data["permit_ref"],),
+        ).fetchone()
+        if permit is not None:
+            data.update(permit_window_state(permit))
+        else:
+            data["near_expiry_warn"] = False
+            data["release_blocked"] = True
+            data["valid_until"] = None
         holds = conn.execute(
             "SELECT * FROM exceed_holds WHERE sample_id=? ORDER BY id DESC",
             (sample_id,),

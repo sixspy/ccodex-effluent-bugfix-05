@@ -6,6 +6,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user
+from permit_window import permit_window_state
 from validators import validate_permit_match
 
 router = APIRouter(tags=["reconcile"])
@@ -41,8 +42,9 @@ def _reconcile_permit(conn, permit_code: str) -> dict:
         "SELECT * FROM discharge_permits WHERE permit_code=?", (permit_code,)
     ).fetchone()
     samples = conn.execute(
-        """SELECT sample_code, flow_m3h, metrics, status, generation FROM sample_batches
-           WHERE permit_ref=? AND status NOT IN ('作废')""",
+        """SELECT s.id, s.sample_code, s.flow_m3h, s.metrics, s.status, s.generation
+           FROM sample_batches s
+           WHERE s.permit_ref=? AND s.status NOT IN ('作废')""",
         (permit_code,),
     ).fetchall()
     if not samples:
@@ -57,6 +59,7 @@ def _reconcile_permit(conn, permit_code: str) -> dict:
         "nh3n": permit["nh3n_cap"],
         "tp": permit["tp_cap"],
     }
+    window = permit_window_state(permit)
     details = []
     all_ok = True
     for s in samples:
@@ -66,6 +69,11 @@ def _reconcile_permit(conn, permit_code: str) -> dict:
         )
         if not ok:
             all_ok = False
+        formal = conn.execute(
+            """SELECT COUNT(*) c FROM discharge_releases
+               WHERE sample_id=? AND status='已准排'""",
+            (s["id"],),
+        ).fetchone()["c"]
         details.append(
             {
                 "sample_code": s["sample_code"],
@@ -74,6 +82,8 @@ def _reconcile_permit(conn, permit_code: str) -> dict:
                 "metrics": metrics,
                 "flow_m3h": s["flow_m3h"],
                 "matched": ok,
+                # 影子意图/非正式行不得被对账当已准排
+                "formally_released": formal > 0,
             }
         )
     seal_rows = conn.execute(
@@ -89,6 +99,10 @@ def _reconcile_permit(conn, permit_code: str) -> dict:
         "balanced": all_ok,
         "proof_ready": all_ok and len(seal_rows) >= 1,
         "seal_count": len(seal_rows),
+        "near_expiry_warn": window["near_expiry_warn"],
+        "expired": window["expired"],
+        "release_blocked": window["block_release"],
+        "valid_until": window["valid_until"],
         "samples": details,
         "seals": [dict(x) for x in seal_rows],
     }
@@ -116,11 +130,25 @@ def proof_sample(sample_code: str, authorization: AuthHeader = None):
         ).fetchall()
         open_holds = [h for h in holds if h["status"] == "开放"]
         closed = [h for h in holds if h["status"] == "已关闭"]
+        permit = conn.execute(
+            "SELECT * FROM discharge_permits WHERE permit_code=?",
+            (sample["permit_ref"],),
+        ).fetchone()
+        window = permit_window_state(permit) if permit else {
+            "near_expiry_warn": False,
+            "expired": False,
+            "block_release": True,
+            "valid_until": None,
+        }
         return {
             "sample_code": sample_code,
             "status": sample["status"],
             "generation": sample["generation"],
             "released": any(r["status"] == "已准排" for r in releases),
+            "release_blocked": window["block_release"],
+            "near_expiry_warn": window["near_expiry_warn"],
+            "expired": window["expired"],
+            "valid_until": window["valid_until"],
             "sealed": any(s["status"] == "已封批" for s in seals),
             "exceed_closed": len(open_holds) == 0 and (len(closed) > 0 or sample["status"] != "旁路挂起"),
             "holds": [dict(h) for h in holds],

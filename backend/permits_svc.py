@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from auth import AuthHeader, require_user, require_writer
 from db import connect, now_iso, write_audit
 from models import PermitIn
+from permit_window import permit_window_state
 
 router = APIRouter(tags=["permits"])
 
@@ -18,7 +19,12 @@ def list_permits(authorization: AuthHeader = None):
             """SELECT d.*, p.plant_code, p.name plant_name FROM discharge_permits d
                JOIN plants p ON p.id=d.plant_id ORDER BY d.id"""
         ).fetchall()
-        return {"items": [dict(r) for r in rows]}
+        items = []
+        for r in rows:
+            d = dict(r)
+            d.update(permit_window_state(r))
+            items.append(d)
+        return {"items": items}
 
 
 @router.get("/api/permits/{permit_code}")
@@ -44,10 +50,9 @@ def get_permit(permit_code: str, authorization: AuthHeader = None):
             d = dict(s)
             d["metrics"] = json.loads(d["metrics"] or "{}")
             items.append(d)
-        # BUGFIX-05 埋雷：详情黄灯但不拦准排
+        # 临期窗唯一裁定口径：黄灯与 block_release 同源，禁止页面临时解释
         data = dict(row)
-        data["near_expiry_warn"] = True
-        data["block_release"] = False
+        data.update(permit_window_state(row))
         return {"permit": data, "samples": items}
 
 
@@ -66,7 +71,8 @@ def create_permit(body: PermitIn, authorization: AuthHeader = None):
             raise HTTPException(400, "许可编码已存在")
         cur = conn.execute(
             """INSERT INTO discharge_permits(permit_code,plant_id,quota_m3d,cod_cap,nh3n_cap,
-               tp_cap,period_label,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+               tp_cap,period_label,status,valid_until,near_expiry_window_days,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 body.permit_code,
                 body.plant_id,
@@ -76,9 +82,15 @@ def create_permit(body: PermitIn, authorization: AuthHeader = None):
                 body.tp_cap,
                 body.period_label,
                 "有效",
+                body.valid_until,
+                body.near_expiry_window_days,
                 now_iso(),
             ),
         )
         write_audit(conn, user, "permit_create", body.permit_code, body.model_dump())
         conn.commit()
-        return {"id": cur.lastrowid, **body.model_dump(), "status": "有效"}
+        return {
+            "id": cur.lastrowid,
+            **body.model_dump(),
+            "status": "有效",
+        }

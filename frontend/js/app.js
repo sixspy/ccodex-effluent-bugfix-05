@@ -60,6 +60,7 @@ createApp({
     const permitForm = ref({
       permit_code: "DP-NEW-01", plant_id: 1, quota_m3d: 18000,
       cod_cap: 50, nh3n_cap: 5, tp_cap: 0.5, period_label: "2026Q4",
+      valid_until: "2027-12-31", near_expiry_window_days: 30,
     });
     const lineageForm = ref({
       from_sample_id: 1, to_sample_id: 2, edge_type: "复测续批", detail: "试验血缘",
@@ -81,6 +82,20 @@ createApp({
     const sealableSamples = computed(() =>
       samples.value.filter((s) => ["已裁定", "已准排"].includes(s.status))
     );
+    const selectedReleaseSample = computed(() =>
+      samples.value.find((s) => s.id === releaseForm.value.sample_id) || null
+    );
+    // 许可黄灯与准排按钮互斥：阻断标志全部来自后端同源临期窗裁定
+    const releaseBlocked = computed(
+      () => !!selectedReleaseSample.value && !!selectedReleaseSample.value.release_blocked
+    );
+
+    function permitStatusClass(p) {
+      if (!p) return "muted";
+      if (p.near_expiry_warn || p.expired) return "warn";
+      if (p.status && p.status.includes("有效")) return "pass";
+      return "muted";
+    }
 
     function statusClass(s) {
       if (!s) return "muted";
@@ -164,7 +179,13 @@ createApp({
       }));
     }
     async function closeExceed(id) { await flash(() => api.closeExceed({ hold_id: id, note: "页面闭环" })); }
-    async function createRelease() { await flash(() => api.createRelease(releaseForm.value)); }
+    async function createRelease() {
+      if (releaseBlocked.value) {
+        actionErr.value = "许可已入临期/过期窗，正式准排被写口拒收，请先续期";
+        return;
+      }
+      await flash(() => api.createRelease(releaseForm.value));
+    }
     async function createSeal() {
       await flash(() => api.createSeal({
         sample_id: sealForm.value.sample_id,
@@ -223,6 +244,7 @@ createApp({
       reconOne, reconAllItems, proofOne, reconCode, proofCode,
       plantForm, outfallForm, sampleForm, releaseForm, sealForm, permitForm,
       lineageForm, labForm, sludgeForm, releasableSamples, sealableSamples,
+      selectedReleaseSample, releaseBlocked, permitStatusClass,
       login, logout, refresh, statusClass, sampleClass, fmtMetrics,
       loadPlant, loadSample, createPlant, createOutfall, createSample,
       closeExceed, createRelease, createSeal, createPermit, createLineage,

@@ -8,6 +8,8 @@
     "tp_cap": 0.5,
     "period_label": "2026Q4",
     "status": "有效",
+    "valid_until": "2027-12-31",
+    "near_expiry_window_days": 30,
     "created_at": "2026-11-01T10:00:00"
   },
   {
@@ -19,6 +21,8 @@
     "tp_cap": 0.5,
     "period_label": "2026Q4",
     "status": "有效",
+    "valid_until": "2027-12-31",
+    "near_expiry_window_days": 30,
     "created_at": "2026-11-01T10:05:00"
   },
   {
@@ -30,6 +34,8 @@
     "tp_cap": 0.3,
     "period_label": "2026Q4",
     "status": "有效",
+    "valid_until": "2026-11-30",
+    "near_expiry_window_days": 30,
     "created_at": "2026-11-01T10:10:00"
   }
 ]

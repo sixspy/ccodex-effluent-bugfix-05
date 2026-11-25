@@ -16,9 +16,18 @@ export const releaseViewTemplate = `
       <h3>签发准排</h3>
       <label>已裁定采样</label>
       <select v-model.number="releaseForm.sample_id">
-        <option v-for="s in releasableSamples" :key="s.id" :value="s.id">{{ s.sample_code }} · {{ s.status }}</option>
+        <option v-for="s in releasableSamples" :key="s.id" :value="s.id"
+                :disabled="s.release_blocked">
+          {{ s.sample_code }} · {{ s.status }}{{ s.release_blocked ? ' · 临期禁准排' : '' }}
+        </option>
       </select>
+      <p v-if="selectedReleaseSample && selectedReleaseSample.release_blocked" class="banner"
+         style="margin:0.5rem 0">
+        许可临期/过期窗内，正式准排整笔拒收（许可黄灯与准排按钮互斥，待续期后办理）。
+      </p>
       <label>值班员</label><input v-model="releaseForm.officer"/>
-      <div class="actions"><button @click="createRelease">准排</button></div>
+      <div class="actions">
+        <button @click="createRelease" :disabled="releaseBlocked">准排</button>
+      </div>
     </div>
   </div>`;

@@ -4,13 +4,18 @@ export const reconcileViewTemplate = `
       <h3>许可对账</h3>
       <div class="actions"><button class="secondary" @click="loadReconcile">刷新全部</button></div>
       <table>
-        <thead><tr><th>许可</th><th>对齐</th><th>证明</th><th>封批数</th></tr></thead>
+        <thead><tr><th>许可</th><th>对齐</th><th>证明</th><th>封批数</th><th>临期窗</th></tr></thead>
         <tbody>
           <tr v-for="r in reconAllItems" :key="r.permit_code">
             <td>{{ r.permit_code }}</td>
             <td :class="r.balanced?'pass':'fail'">{{ r.balanced ? "齐" : "不齐" }}</td>
             <td :class="r.proof_ready?'pass':'warn'">{{ r.proof_ready ? "可证" : "未齐" }}</td>
             <td>{{ r.seal_count || 0 }}</td>
+            <td>
+              <span v-if="r.near_expiry_warn" class="warn">临期黄灯·禁准排</span>
+              <span v-else-if="r.expired" class="fail">已过期·禁准排</span>
+              <span v-else class="pass">窗口正常</span>
+            </td>
           </tr>
         </tbody>
       </table>

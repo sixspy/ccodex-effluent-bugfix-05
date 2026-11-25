@@ -64,6 +64,8 @@ class PermitIn(BaseModel):
     nh3n_cap: float
     tp_cap: float
     period_label: str
+    valid_until: str | None = None
+    near_expiry_window_days: int = Field(default=30, gt=0, le=365)
 
 
 class LineageIn(BaseModel):
